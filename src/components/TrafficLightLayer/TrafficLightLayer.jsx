@@ -8,11 +8,22 @@ import { useSimulationStore } from '../../store/simulationStore'
 // signal states without needing separate image assets.
 // ---------------------------------------------------------------------------
 const ICON_SIZE = 64
-const SVG_CIRCLE = `<svg xmlns="http://www.w3.org/2000/svg" width="${ICON_SIZE}" height="${ICON_SIZE}"><circle cx="32" cy="32" r="28" fill="white"/></svg>`
-const ICON_ATLAS = `data:image/svg+xml;base64,${btoa(SVG_CIRCLE)}`
+// Two icons in one atlas:
+//   "dot"  — filled circle (the coloured signal lamp)
+//   "ring" — outlined ring (white glow halo rendered behind dot)
+const SVG_ATLAS = [
+  `<svg xmlns="http://www.w3.org/2000/svg" width="${ICON_SIZE * 2}" height="${ICON_SIZE}">`,
+  // dot — slot 0..63
+  `<circle cx="32" cy="32" r="28" fill="white"/>`,
+  // ring — slot 64..127 (stroke only, transparent fill)
+  `<circle cx="${ICON_SIZE + 32}" cy="32" r="26" fill="none" stroke="white" stroke-width="5"/>`,
+  `</svg>`,
+].join('')
 
+const ICON_ATLAS   = `data:image/svg+xml;base64,${btoa(SVG_ATLAS)}`
 const ICON_MAPPING = {
-  circle: { x: 0, y: 0, width: ICON_SIZE, height: ICON_SIZE, mask: true },
+  dot:  { x: 0,           y: 0, width: ICON_SIZE, height: ICON_SIZE, mask: true },
+  ring: { x: ICON_SIZE,   y: 0, width: ICON_SIZE, height: ICON_SIZE, mask: true },
 }
 
 // ---------------------------------------------------------------------------
@@ -61,40 +72,52 @@ export default function useTrafficLightLayer() {
     [trafficLights],
   )
 
+  // Halo ring layer — rendered first (below) so the coloured dot sits on top
+  const ringLayer = new IconLayer({
+    id: 'tl-ring-layer',
+    data,
+    iconAtlas:   ICON_ATLAS,
+    iconMapping: ICON_MAPPING,
+    getIcon:     () => 'ring',
+    getPosition: (d) => d.position,
+    getSize:     28,
+    sizeUnits:   'pixels',
+    getColor:    (d) => { const c = stateToColor(d.state); return [c[0], c[1], c[2], 100] },
+    billboard:   true,
+    updateTriggers: { getColor: trafficLights },
+  })
+
   const iconLayer = new IconLayer({
     id: 'tl-icon-layer',
     data,
-    iconAtlas: ICON_ATLAS,
+    iconAtlas:   ICON_ATLAS,
     iconMapping: ICON_MAPPING,
-    getIcon: () => 'circle',
+    getIcon:     () => 'dot',
     getPosition: (d) => d.position,
-    getSize: 20,
-    sizeUnits: 'pixels',
-    getColor: (d) => stateToColor(d.state),
-    pickable: true,
-    updateTriggers: {
-      getColor: trafficLights,
-    },
+    getSize:     20,
+    sizeUnits:   'pixels',
+    getColor:    (d) => stateToColor(d.state),
+    billboard:   true,
+    pickable:    true,
+    updateTriggers: { getColor: trafficLights },
   })
 
   const textLayer = new TextLayer({
     id: 'tl-text-layer',
     data,
-    getPosition: (d) => d.textPosition,
-    getText: (d) => String(d.remaining),
-    getSize: 11,
-    sizeUnits: 'pixels',
-    getColor: [255, 255, 255, 230],
-    getTextAnchor: 'middle',
+    getPosition:          (d) => d.position,
+    getText:              (d) => String(d.remaining),
+    getSize:              12,
+    sizeUnits:            'pixels',
+    getColor:             [255, 255, 255, 255],
+    getTextAnchor:        'middle',
     getAlignmentBaseline: 'center',
-    fontFamily: '"JetBrains Mono", "Fira Mono", monospace',
-    fontWeight: 700,
-    pixelOffset: [0, -18],  // float above the icon
-    billboard: true,
-    updateTriggers: {
-      getText: trafficLights,
-    },
+    fontFamily:           '"Inter", "Helvetica Neue", sans-serif',
+    fontWeight:           700,
+    pixelOffset:          [0, -22],   // float above the icon
+    billboard:            true,
+    updateTriggers: { getText: trafficLights },
   })
 
-  return [iconLayer, textLayer]
+  return [ringLayer, iconLayer, textLayer]
 }
