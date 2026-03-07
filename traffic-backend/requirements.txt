@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+websockets
+traci
+torch
+torch-geometric
+prophet
+networkx
+numpy
+pandas
