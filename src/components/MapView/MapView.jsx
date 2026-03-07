@@ -37,10 +37,11 @@ const MAP_STYLE = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.j
  *   cameras in perfect sync.
  *
  * Layer order (bottom → top):
- *   1. DensityHeatmap      – traffic density glow beneath everything
- *   2. CarLayer            – animated vehicle dots with lerp interpolation
- *   3. TL IconLayer        – signal state circles (r/y/g)
- *   4. TL TextLayer        – countdown seconds floating above icons
+ *   1. HeatmapLayer        – subtle ambient density glow (low opacity)
+ *   2. LineLayer           – road congestion stripes (red/orange, ≤15 km/h only)
+ *   3. CarLayer            – top-down car icons, lerp pos + heading rotation
+ *   4. TL IconLayer        – signal state circles (r/y/g)
+ *   5. TL TextLayer        – countdown seconds floating above icons
  */
 export default function MapView() {
   const mapContainerRef = useRef(null)
@@ -48,10 +49,12 @@ export default function MapView() {
   const [viewState, setViewState] = useState(INITIAL_VIEW_STATE)
 
   // ── Layer hooks ─────────────────────────────────────────────────────────
-  // useTrafficLightLayer returns [IconLayer, TextLayer]
-  const heatmapLayer = useDensityHeatmap()
-  const carLayer = useCarLayer()
-  const tlLayers = useTrafficLightLayer()  // array: [iconLayer, textLayer]
+  // useDensityHeatmap  → [HeatmapLayer(ambient), LineLayer(road congestion)]
+  // useCarLayer        → IconLayer (car icons with rotation + lerp)
+  // useTrafficLightLayer → [IconLayer, TextLayer]
+  const roadLayers = useDensityHeatmap()   // array: [ambientHeatmap, roadCongestion]
+  const carLayer   = useCarLayer()
+  const tlLayers   = useTrafficLightLayer()
 
   // ── Mount MapLibre GL ──────────────────────────────────────────────────
   useEffect(() => {
@@ -132,7 +135,7 @@ export default function MapView() {
         viewState={viewState}
         controller
         onViewStateChange={onViewStateChange}
-        layers={[heatmapLayer, carLayer, ...tlLayers]}
+        layers={[...roadLayers, carLayer, ...tlLayers]}
         getTooltip={getTooltip}
         style={{ position: 'absolute', inset: 0 }}
       />
