@@ -3,57 +3,63 @@ import { IconLayer } from '@deck.gl/layers'
 import { useSimulationStore } from '../../store/simulationStore'
 
 // ── Constants ────────────────────────────────────────────────────────────────
-const ALPHA       = 0.15   // position lerp factor per rAF frame (~60fps → smooth over 100ms tick)
-const ALPHA_ROT   = 0.20   // rotation lerp factor (slightly faster than position)
-const SNAP_POS    = 1e-9   // stop lerping position below this delta (degrees)
-const SNAP_ROT    = 0.05   // stop lerping rotation below this delta (degrees)
-const MIN_MOVE_FOR_ANGLE = 1e-7  // minimum movement before we recalculate heading
+const ALPHA    = 0.25   // lerp factor per rAF frame (position + rotation)
+const SNAP_POS = 1e-9   // stop lerping position below this delta (degrees)
+const SNAP_ROT = 0.05   // stop lerping rotation below this delta (degrees)
 
 // ── Car SVG Icon Atlas ───────────────────────────────────────────────────────
-// Top-down car, 20×36 viewBox, pointing NORTH (up) by default.
-// NOTE: "currentColor" does NOT work in a data-URI SVG (no CSS context),
-// so the body is explicitly "white". With mask:true, Deck.gl uses pixel
-// brightness as opacity and applies getColor as the tint:
-//   white body   → fully opaque, speed colour (green / orange / red)
-//   #222 glass   → ~13% brightness → nearly transparent (dark shadow)
-//   #555 wheels  → 33% brightness  → subtle grey corners
-//   #87CEEB windshield → ~72% brightness → lighter tinted glass
+// Realistic top-down car, 14×28 viewport, pointing NORTH (up = front of car).
+// mask:true → pixel brightness becomes alpha; getColor is the solid tint.
+//   white body     → fully opaque tint (speed colour)
+//   #aaddff glass  → ~84% brightness → slightly lighter tinted area (windshield)
+//   #ffffaa lights → ~93% brightness → bright highlight (headlights)
+//   #ff4444 lights → ~53% brightness → darker tinted area (tail lights)
+//   #222 wheels    → ~13% brightness → nearly transparent corner bumps
 const CAR_SVG = [
-  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 36" width="20" height="36">',
-  // Body — white so mask:true tints it with getColor
-  '<rect x="2" y="4" width="16" height="28" rx="4" fill="white"/>',
-  // Rear glass
-  '<rect x="4" y="2" width="12" height="8" rx="2" fill="#222" opacity="0.8"/>',
-  // Front glass
-  '<rect x="4" y="24" width="12" height="8" rx="2" fill="#222" opacity="0.8"/>',
-  // Wheels — four corners
-  '<rect x="1" y="6" width="3" height="5" rx="1" fill="#555"/>',
-  '<rect x="16" y="6" width="3" height="5" rx="1" fill="#555"/>',
-  '<rect x="1" y="24" width="3" height="5" rx="1" fill="#555"/>',
-  '<rect x="16" y="24" width="3" height="5" rx="1" fill="#555"/>',
-  // Windshield (front) — light blue tint
-  '<rect x="5" y="6" width="10" height="6" rx="1" fill="#87CEEB" opacity="0.9"/>',
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 14 28" width="14" height="28">',
+  // Body
+  '<rect x="1" y="3" width="12" height="22" rx="3" fill="white"/>',
+  // Front windshield
+  '<rect x="2.5" y="4" width="9" height="6" rx="1.5" fill="#aaddff" opacity="0.9"/>',
+  // Rear windshield
+  '<rect x="2.5" y="18" width="9" height="5" rx="1.5" fill="#aaddff" opacity="0.6"/>',
+  // Front wheels
+  '<rect x="0" y="5" width="2.5" height="4" rx="1" fill="#222"/>',
+  '<rect x="11.5" y="5" width="2.5" height="4" rx="1" fill="#222"/>',
+  // Back wheels
+  '<rect x="0" y="19" width="2.5" height="4" rx="1" fill="#222"/>',
+  '<rect x="11.5" y="19" width="2.5" height="4" rx="1" fill="#222"/>',
+  // Front headlights
+  '<rect x="2" y="3" width="3" height="1.5" rx="0.5" fill="#ffffaa"/>',
+  '<rect x="9" y="3" width="3" height="1.5" rx="0.5" fill="#ffffaa"/>',
+  // Back lights
+  '<rect x="2" y="24" width="3" height="1.5" rx="0.5" fill="#ff4444"/>',
+  '<rect x="9" y="24" width="3" height="1.5" rx="0.5" fill="#ff4444"/>',
   '</svg>',
 ].join('')
 
 const CAR_ATLAS   = `data:image/svg+xml;base64,${btoa(CAR_SVG)}`
 const CAR_MAPPING = {
-  // width/height must match the SVG pixel dimensions declared above
-  car: { x: 0, y: 0, width: 20, height: 36, mask: true },
+  car: { x: 0, y: 0, width: 14, height: 28, mask: true },
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-/** Speed (m/s) → RGBA tint colour (applied via mask). */
+/**
+ * Speed (m/s) → RGBA tint colour.
+ * > 10 m/s  → white  (moving fast, like SUMO default)
+ * 3–10 m/s  → orange (slow traffic)
+ * < 3 m/s   → red    (stopped / jammed)
+ */
 function speedToColor(speed) {
-  if (speed > 10) return [0,   204, 68,  245]   // #00CC44 – free flow
-  if (speed >= 3) return [255, 149, 0,   245]   // #FF9500 – slow
-  return                  [255, 59,  48,  245]   // #FF3B30 – congested
+  if (speed > 10) return [255, 255, 255, 245]
+  if (speed >= 3) return [255, 165, 0,   245]
+  return                  [255, 60,  60,  245]
 }
 
 /**
  * Lerp between two angles (degrees) along the shortest arc.
- * Prevents the 359° → 1° jump from spinning 358° the wrong way.
+ * Prevents the 359°→1° wrap from spinning the wrong way (358° rotation).
  */
 function lerpAngle(a, b, t) {
   let diff = b - a
@@ -62,25 +68,36 @@ function lerpAngle(a, b, t) {
   return a + diff * t
 }
 
+/**
+ * Map deck.gl zoom level → icon pixel size.
+ * Keeps cars readable at all zoom levels without overwhelming the map.
+ */
+function sizeForZoom(zoom) {
+  if (zoom < 13)  return 8
+  if (zoom <= 15) return 12
+  return 16
+}
+
 // ── Hook ─────────────────────────────────────────────────────────────────────
 
 /**
- * useCarLayer – returns a Deck.gl IconLayer that renders each vehicle as a
- * top-down car icon with:
- *   • Smooth position interpolation via requestAnimationFrame lerp
- *   • Heading/rotation that tracks actual movement direction
- *   • Speed-based colour tinting (green / orange / red)
+ * useCarLayer(zoom) – returns a Deck.gl IconLayer that renders every active
+ * vehicle as a top-down car icon with:
+ *   • Zoom-responsive size (8 / 12 / 16 px)
+ *   • Smooth position + heading lerp at 0.25 per rAF frame
+ *   • Heading derived from Math.atan2(dLng, dLat) → CW-from-north (Deck.gl convention)
+ *   • Backend angle used as fallback when vehicle is stationary
+ *   • Speed-based colour tint: white (fast) / orange (slow) / red (stopped)
  *
- * displayMap shape per entry:
- *   { lng, lat, speed, angle }   ← lerped values actually drawn
- * targetMap shape per entry:
- *   { lng, lat, speed, angle }   ← latest values from the Zustand store
+ * Internal ref shapes:
+ *   displayMap  { id → { lng, lat, speed, angle } }  ← lerped, what gets drawn
+ *   targetMap   { id → { lng, lat, speed, angle } }  ← latest store snapshot
  */
-export default function useCarLayer() {
-  const vehicles = useSimulationStore((state) => state.vehicles)
+export default function useCarLayer(zoom = 15) {
+  const vehicles = useSimulationStore((s) => s.vehicles)
 
-  const displayMap = useRef({})   // currently drawn state (mutated in rAF)
-  const targetMap  = useRef({})   // latest store state (set in useEffect)
+  const displayMap = useRef({})
+  const targetMap  = useRef({})
 
   const [tick, setTick] = useState(0)
 
@@ -89,19 +106,16 @@ export default function useCarLayer() {
     const next = {}
     for (const v of vehicles) {
       if (v.lng == null || v.lat == null) continue
-      // Backend provides `angle` (traci.vehicle.getAngle) – degrees CW from north
-      const backendAngle = v.angle ?? 0
-      next[v.id] = { lng: v.lng, lat: v.lat, speed: v.speed ?? 0, angle: backendAngle }
-
+      next[v.id] = {
+        lng:   v.lng,
+        lat:   v.lat,
+        speed: v.speed ?? 0,
+        angle: v.angle ?? 0,   // traci.vehicle.getAngle – CW from north
+      }
       if (!displayMap.current[v.id]) {
-        // First appearance: teleport to exact target position + heading
         displayMap.current[v.id] = { ...next[v.id] }
-      } else {
-        // Update target angle from backend (authoritative source)
-        displayMap.current[v.id]  // keep existing lerped pos; targetMap drives lerp
       }
     }
-    // Prune departed vehicles
     for (const id of Object.keys(displayMap.current)) {
       if (!next[id]) delete displayMap.current[id]
     }
@@ -114,6 +128,7 @@ export default function useCarLayer() {
 
     const frame = () => {
       let moved = false
+
       for (const id of Object.keys(displayMap.current)) {
         const tgt = targetMap.current[id]
         if (!tgt) continue
@@ -123,28 +138,26 @@ export default function useCarLayer() {
         const dLat = tgt.lat - pos.lat
 
         if (Math.abs(dLng) > SNAP_POS || Math.abs(dLat) > SNAP_POS) {
-          // ── Compute heading from movement direction ──────────────────
-          // Math.atan2(dLng, dLat): angle CW from north (0=N, 90=E, 180=S, 270=W)
-          // This matches both SUMO's getAngle convention and Deck.gl's getAngle.
-          if (Math.abs(dLng) > MIN_MOVE_FOR_ANGLE || Math.abs(dLat) > MIN_MOVE_FOR_ANGLE) {
-            const movementAngle = Math.atan2(dLng, dLat) * 180 / Math.PI
-            // Lerp toward movement angle; backend angle is fallback when stopped
-            pos.angle = lerpAngle(pos.angle, movementAngle, ALPHA_ROT)
-          }
-
+          // Heading: Math.atan2(dLng, dLat) gives CW-from-north degrees,
+          // which is the same convention as Deck.gl's getAngle and SUMO's getAngle.
+          //   dLng=0, dLat>0  → atan2(0, +) = 0°  (north) ✓
+          //   dLng>0, dLat=0  → atan2(+, 0) = 90° (east)  ✓
+          const heading = Math.atan2(dLng, dLat) * (180 / Math.PI)
+          pos.angle = lerpAngle(pos.angle, heading, ALPHA)
           pos.lng   += dLng * ALPHA
           pos.lat   += dLat * ALPHA
           pos.speed  = tgt.speed
           moved = true
         } else {
-          // Stationary — still lerp angle toward backend value (e.g. lane changes)
-          const dAngle = tgt.angle - pos.angle
-          if (Math.abs(((dAngle + 180) % 360) - 180) > SNAP_ROT) {
-            pos.angle = lerpAngle(pos.angle, tgt.angle, ALPHA_ROT)
+          // Stationary – lerp angle toward backend value (lane changes, corrections)
+          const normalised = ((tgt.angle - pos.angle + 180) % 360) - 180
+          if (Math.abs(normalised) > SNAP_ROT) {
+            pos.angle = lerpAngle(pos.angle, tgt.angle, ALPHA)
             moved = true
           }
         }
       }
+
       if (moved) setTick((t) => t + 1)
       rafId = requestAnimationFrame(frame)
     }
@@ -153,7 +166,7 @@ export default function useCarLayer() {
     return () => cancelAnimationFrame(rafId)
   }, [])
 
-  // ── Build data array (only when tick changes) ────────────────────────────
+  // ── Build render data (recomputed only when rAF tick fires) ──────────────
   const data = useMemo(
     () =>
       Object.values(displayMap.current).map((d) => ({
@@ -165,26 +178,28 @@ export default function useCarLayer() {
     [tick],
   )
 
+  const iconSize = sizeForZoom(zoom)
+
   return new IconLayer({
     id: 'car-layer',
     data,
-    iconAtlas:   CAR_ATLAS,
-    iconMapping: CAR_MAPPING,
-    getIcon:     () => 'car',
-    getPosition: (d) => d.position,
-    getAngle:    (d) => d.angle,
-    getColor:    (d) => speedToColor(d.speed),
-    // getSize applies to the HEIGHT of the icon (36px natural height).
-    // At getSize:28 the car is 28px tall × (20/36) ≈ 15.6px wide — matches spec.
-    getSize:       28,
+    iconAtlas:     CAR_ATLAS,
+    iconMapping:   CAR_MAPPING,
+    getIcon:       () => 'car',
+    getPosition:   (d) => d.position,
+    getAngle:      (d) => d.angle,
+    getColor:      (d) => speedToColor(d.speed),
+    // sizeMin/Max both set to iconSize → exact pixel size, no stretching
+    getSize:       iconSize,
     sizeUnits:     'pixels',
-    sizeMinPixels: 12,
-    sizeMaxPixels: 28,
+    sizeMinPixels: iconSize,
+    sizeMaxPixels: iconSize,
     pickable:      true,
-    billboard:     false,   // flat on map plane, rotates with heading
+    billboard:     false,   // flat on the map plane; rotates with vehicle heading
     updateTriggers: {
       getColor: tick,
       getAngle: tick,
+      getSize:  zoom,
     },
   })
 }

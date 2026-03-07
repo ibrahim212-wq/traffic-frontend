@@ -13,7 +13,7 @@ import useDensityHeatmap from '../DensityHeatmap/DensityHeatmap'
 const INITIAL_VIEW_STATE = {
   latitude: 24.7136,
   longitude: 46.6753,
-  zoom: 14,
+  zoom: 15,
   pitch: 45,
   bearing: 0,
   minZoom: 8,
@@ -53,7 +53,7 @@ export default function MapView() {
   // useCarLayer        → IconLayer (car icons with rotation + lerp)
   // useTrafficLightLayer → [IconLayer, TextLayer]
   const roadLayers = useDensityHeatmap()   // array: [ambientHeatmap, roadCongestion]
-  const carLayer   = useCarLayer()
+  const carLayer   = useCarLayer(viewState.zoom)
   const tlLayers   = useTrafficLightLayer()
 
   // ── Mount MapLibre GL ──────────────────────────────────────────────────
