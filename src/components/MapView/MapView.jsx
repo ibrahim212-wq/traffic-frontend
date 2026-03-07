@@ -130,14 +130,15 @@ export default function MapView() {
         style={{ position: 'absolute', inset: 0 }}
       />
 
-      {/* DeckGL overlay */}
+      {/* DeckGL overlay — canvas must be transparent so MapLibre tiles show through */}
       <DeckGL
         viewState={viewState}
         controller
         onViewStateChange={onViewStateChange}
         layers={[...roadLayers, carLayer, ...tlLayers]}
         getTooltip={getTooltip}
-        style={{ position: 'absolute', inset: 0 }}
+        style={{ position: 'absolute', inset: 0, background: 'transparent' }}
+        parameters={{ clearColor: [0, 0, 0, 0] }}
       />
     </div>
   )

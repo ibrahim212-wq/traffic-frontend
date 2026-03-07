@@ -10,31 +10,23 @@ const SNAP_ROT    = 0.05   // stop lerping rotation below this delta (degrees)
 const MIN_MOVE_FOR_ANGLE = 1e-7  // minimum movement before we recalculate heading
 
 // ── Car SVG Icon Atlas ───────────────────────────────────────────────────────
-// Top-down car silhouette, pointing NORTH (up) by default.
-// White fill + mask:true → Deck.gl tints with getColor at render time.
-// 64×64 canvas; wheels protrude for a realistic footprint.
+// Simple top-down car, 24×24, pointing NORTH (up) by default.
+// White body + mask:true → Deck.gl tints the white areas with getColor.
+// Dark fills (#333 windows, #555 wheels) render as dimmer tinted regions.
 const CAR_SVG = [
-  '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">',
-  // Main body
-  '<rect x="18" y="5" width="28" height="54" rx="10" fill="white"/>',
-  // Front windshield (dark glass — mask causes it to show dimmer tint)
-  '<rect x="22" y="13" width="20" height="13" rx="4" fill="rgba(0,0,0,0.45)"/>',
-  // Rear windshield
-  '<rect x="22" y="38" width="20" height="11" rx="4" fill="rgba(0,0,0,0.35)"/>',
-  // Front-left wheel
-  '<rect x="8" y="12" width="11" height="16" rx="4" fill="white"/>',
-  // Front-right wheel
-  '<rect x="45" y="12" width="11" height="16" rx="4" fill="white"/>',
-  // Rear-left wheel
-  '<rect x="8" y="36" width="11" height="16" rx="4" fill="white"/>',
-  // Rear-right wheel
-  '<rect x="45" y="36" width="11" height="16" rx="4" fill="white"/>',
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">',
+  '<rect x="4" y="6" width="16" height="12" rx="3" ry="3" fill="white"/>',
+  '<rect x="6" y="8" width="12" height="7" rx="1" fill="#333"/>',
+  '<rect x="4" y="15" width="4" height="3" rx="1" fill="#555"/>',
+  '<rect x="16" y="15" width="4" height="3" rx="1" fill="#555"/>',
+  '<rect x="4" y="6" width="4" height="3" rx="1" fill="#555"/>',
+  '<rect x="16" y="6" width="4" height="3" rx="1" fill="#555"/>',
   '</svg>',
 ].join('')
 
 const CAR_ATLAS   = `data:image/svg+xml;base64,${btoa(CAR_SVG)}`
 const CAR_MAPPING = {
-  car: { x: 0, y: 0, width: 64, height: 64, mask: true },
+  car: { x: 0, y: 0, width: 24, height: 24, mask: true },
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -169,10 +161,10 @@ export default function useCarLayer() {
     getPosition: (d) => d.position,
     getAngle:    (d) => d.angle,
     getColor:    (d) => speedToColor(d.speed),
-    getSize:     22,
+    getSize:     10,
     sizeUnits:   'pixels',
-    sizeMinPixels: 8,
-    sizeMaxPixels: 40,
+    sizeMinPixels: 6,
+    sizeMaxPixels: 12,
     pickable:    true,
     billboard:   false,   // false = icon stays flat on the map, not facing camera
     updateTriggers: {
