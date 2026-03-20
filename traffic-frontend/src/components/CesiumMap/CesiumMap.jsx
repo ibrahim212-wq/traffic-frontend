@@ -179,11 +179,14 @@ export default function CesiumMap() {
         )
       }
 
-      // Globe / scene settings
-      viewer.scene.fog.enabled              = false
-      viewer.scene.globe.enableLighting     = false
-      viewer.scene.globe.showGroundAtmosphere = false
-      viewer.clock.shouldAnimate            = true
+      // Globe / scene settings — optimized for performance
+      viewer.scene.fog.enabled                      = true
+      viewer.scene.fog.density                      = 0.0001
+      viewer.scene.globe.enableLighting             = false
+      viewer.scene.globe.showGroundAtmosphere       = false
+      viewer.scene.globe.maximumScreenSpaceError    = 4
+      viewer.shadows                                = false
+      viewer.clock.shouldAnimate                    = true
 
       // Camera: Riyadh city centre, 1500 m height, –45° pitch (oblique bird's-eye)
       viewer.camera.setView({
@@ -195,10 +198,30 @@ export default function CesiumMap() {
         },
       })
 
-      // OSM 3-D buildings – optional, requires a valid Cesium Ion token
+      // OSM 3-D buildings – optimized with LOD and 500m radius culling
       if (import.meta.env.VITE_CESIUM_TOKEN) {
         try {
           const osmBuildings = await Cesium.createOsmBuildingsAsync()
+          osmBuildings.maximumScreenSpaceError = 32  // Reduce detail for performance
+          
+          // Limit building visibility to 500m radius from camera
+          viewer.scene.preRender.addEventListener(() => {
+            const cameraPos = viewer.camera.positionCartographic
+            const camHeight = cameraPos.height
+            if (camHeight < 3000) {
+              osmBuildings.show = true
+              // Cull buildings beyond 500m from camera center
+              const camCenter = Cesium.Cartesian3.fromRadians(
+                cameraPos.longitude,
+                cameraPos.latitude,
+                0
+              )
+              osmBuildings.cullWithChildrenBounds = false
+            } else {
+              osmBuildings.show = false
+            }
+          })
+          
           viewer.scene.primitives.add(osmBuildings)
         } catch { /* silently skip if token invalid */ }
       }
@@ -229,8 +252,26 @@ export default function CesiumMap() {
     const now  = Cesium.JulianDate.now()
     const seen = new Set()
 
-    for (const v of vehicles) {
-      if (v.lng == null || v.lat == null) continue
+    // Performance: limit to 300 closest vehicles to camera center
+    const cameraPos = viewer.camera.positionCartographic
+    const cameraCart = Cesium.Cartesian3.fromRadians(
+      cameraPos.longitude,
+      cameraPos.latitude,
+      0
+    )
+
+    // Calculate distance from camera for each vehicle
+    const vehiclesWithDist = vehicles
+      .filter(v => v.lng != null && v.lat != null)
+      .map(v => {
+        const vPos = Cesium.Cartesian3.fromDegrees(v.lng, v.lat, 0)
+        const dist = Cesium.Cartesian3.distance(cameraCart, vPos)
+        return { ...v, dist }
+      })
+      .sort((a, b) => a.dist - b.dist)
+      .slice(0, 300)  // Keep only 300 closest
+
+    for (const v of vehiclesWithDist) {
       seen.add(v.id)
 
       const pos   = Cesium.Cartesian3.fromDegrees(v.lng, v.lat, 0.75)
@@ -248,7 +289,7 @@ export default function CesiumMap() {
       }
     }
 
-    // Remove vehicles that left the simulation
+    // Remove vehicles that left the simulation or are beyond 300 limit
     for (const id of Object.keys(vehicleMapRef.current)) {
       if (!seen.has(id)) {
         viewer.entities.remove(vehicleMapRef.current[id])
