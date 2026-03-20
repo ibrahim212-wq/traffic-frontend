@@ -109,7 +109,7 @@ export default defineConfig({
         },
       },
     },
-    chunkSizeWarningLimit: 1000,
+    chunkSizeWarningLimit: 10000,
   },
   
   // Base path for deployment (root by default for Vercel)
