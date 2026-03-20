@@ -140,16 +140,83 @@ class SUMORunner:
 
         vehicles = self._collect_vehicles()
         traffic_lights = self._collect_traffic_lights()
+        road_congestion = self._get_road_congestion()
 
         return {
             "step": self._current_step,
             "vehicles": vehicles,
             "traffic_lights": traffic_lights,
+            "road_congestion": road_congestion,
         }
 
     # ------------------------------------------------------------------
     # Data collection helpers
     # ------------------------------------------------------------------
+
+    def _get_road_congestion(self) -> List[Dict[str, Any]]:
+        """
+        Return the top 50 most congested edges in the current simulation step.
+
+        For each edge the congestion level is determined by the ratio of
+        mean speed to max (free-flow) speed:
+            ratio < 0.3  → "heavy"
+            ratio < 0.7  → "medium"
+            else         → "free"   (excluded from the result to keep packets small)
+
+        Returns a list of dicts sorted by speed_ratio ascending (worst first),
+        capped at 50 entries.
+        """
+        results: List[Dict[str, Any]] = []
+
+        try:
+            edge_ids = self._traci.edge.getIDList()
+        except Exception as exc:
+            logger.error("Failed to retrieve edge ID list: %s", exc)
+            return results
+
+        for edge_id in edge_ids:
+            # Internal SUMO edges start with ':' — skip them (junctions, not roads)
+            if edge_id.startswith(":"):
+                continue
+            try:
+                vehicle_count = self._traci.edge.getLastStepVehicleNumber(edge_id)
+                if vehicle_count == 0:
+                    continue  # no vehicles → free flow, skip to keep packet small
+
+                mean_speed = self._traci.edge.getLastStepMeanSpeed(edge_id)
+                max_speed  = self._traci.edge.getMaxSpeed(edge_id)
+
+                if max_speed <= 0:
+                    continue
+
+                ratio = mean_speed / max_speed
+
+                if ratio < 0.3:
+                    level = "heavy"
+                elif ratio < 0.7:
+                    level = "medium"
+                else:
+                    continue  # free flow — omit to keep packet small
+
+                # Edge shape: list of (x, y) SUMO coords converted to [lng, lat]
+                try:
+                    shape_xy = self._traci.edge.getShape(edge_id)
+                    shape = [list(self._convert_to_latlng(x, y)) for x, y in shape_xy]
+                except Exception:
+                    shape = []
+
+                results.append({
+                    "edge_id":     edge_id,
+                    "level":       level,
+                    "speed_ratio": round(ratio, 3),
+                    "shape":       shape,
+                })
+            except Exception as exc:
+                logger.warning("Could not read congestion for edge '%s': %s", edge_id, exc)
+
+        # Sort worst-first and return at most 50 edges
+        results.sort(key=lambda e: e["speed_ratio"])
+        return results[:50]
 
     def _collect_vehicles(self) -> List[Dict[str, Any]]:
         """Return a list of dicts for every active vehicle in the simulation."""
@@ -172,6 +239,7 @@ class SUMORunner:
                     "lat": lat,
                     "lng": lng,
                     "speed": self._traci.vehicle.getSpeed(vid),
+                    "angle": self._traci.vehicle.getAngle(vid),
                     "route_id": self._traci.vehicle.getRouteID(vid),
                 })
             except self._traci.exceptions.TraCIException as exc:
@@ -200,11 +268,20 @@ class SUMORunner:
                 phase = self._traci.trafficlight.getPhase(tl_id)
                 time_remaining = max(0.0, next_switch - current_time)
 
+                # Resolve junction position so the frontend can render TL icons
+                try:
+                    jx, jy = self._traci.junction.getPosition(tl_id)
+                    lng, lat = self._convert_to_latlng(jx, jy)
+                except Exception:
+                    lng, lat = None, None
+
                 traffic_lights.append({
                     "id": tl_id,
                     "current_phase": phase,
                     "state": state,
                     "phase_duration_remaining": round(time_remaining, 2),
+                    "lat": lat,
+                    "lng": lng,
                 })
             except self._traci.exceptions.TraCIException as exc:
                 logger.warning("Could not read data for traffic light '%s': %s", tl_id, exc)
