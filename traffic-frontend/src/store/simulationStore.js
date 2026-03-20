@@ -12,11 +12,13 @@ const HISTORY_LIMIT = 60
  *  aiDecision    {Object|null}   – latest AI decision from DecisionEngine
  *  isConnected   {boolean}       – WebSocket connection state
  *  history       {Array}         – rolling buffer of {step, totalVehicles} snapshots
+ *  roadCongestion {Array}         – top-50 congested edges with shape geometry from SUMO
  */
 export const useSimulationStore = create((set, get) => ({
   step: 0,
   vehicles: [],
   trafficLights: [],
+  roadCongestion: [],
   aiDecision: null,
   isConnected: false,
   history: [],
@@ -40,9 +42,10 @@ export const useSimulationStore = create((set, get) => ({
     const newReroutes = frame.ai_decision?.rerouted_vehicles?.length ?? 0
     set({
       step: frame.step ?? 0,
-      vehicles: frame.vehicles ?? [],
-      trafficLights: frame.traffic_lights ?? [],
-      aiDecision: frame.ai_decision ?? null,
+      vehicles:       frame.vehicles ?? [],
+      trafficLights:  frame.traffic_lights ?? [],
+      roadCongestion: frame.road_congestion ?? [],
+      aiDecision:     frame.ai_decision ?? null,
       history: updatedHistory,
       totalRerouted: totalRerouted + newReroutes,
     })

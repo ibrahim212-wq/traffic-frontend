@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import useWebSocket from './hooks/useWebSocket'
 import { useSimulationStore } from './store/simulationStore'
-import MapView from './components/MapView/MapView'
+import CesiumMap from './components/CesiumMap/CesiumMap'
 import AIPanel from './components/AIPanel/AIPanel'
 
 // ── Design tokens ────────────────────────────────────────────────────────────
@@ -139,7 +139,7 @@ export default function App() {
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden', position: 'relative' }}>
         {/* Map */}
         <div style={{ flex: 1, position: 'relative' }}>
-          <MapView />
+          <CesiumMap />
         </div>
 
         {/* AI Panel */}

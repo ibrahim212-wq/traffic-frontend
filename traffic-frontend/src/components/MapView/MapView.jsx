@@ -8,13 +8,14 @@ import useDensityHeatmap from '../DensityHeatmap/DensityHeatmap'
 
 /**
  * Initial camera centred on Riyadh, Saudi Arabia.
- * pitch=45 gives a slight 3-D tilt that makes vehicle dots more readable.
+ * pitch=30 gives a 3-D tilt that makes extruded vehicle boxes visible
+ * while keeping the map readable.
  */
 const INITIAL_VIEW_STATE = {
   latitude: 24.7136,
   longitude: 46.6753,
-  zoom: 14,
-  pitch: 45,
+  zoom: 15,
+  pitch: 30,
   bearing: 0,
   minZoom: 8,
   maxZoom: 20,
@@ -37,10 +38,12 @@ const MAP_STYLE = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.j
  *   cameras in perfect sync.
  *
  * Layer order (bottom → top):
- *   1. DensityHeatmap      – traffic density glow beneath everything
- *   2. CarLayer            – animated vehicle dots with lerp interpolation
- *   3. TL IconLayer        – signal state circles (r/y/g)
- *   4. TL TextLayer        – countdown seconds floating above icons
+ *   1. HeatmapLayer        – subtle ambient density glow
+ *   2. PathLayer           – road congestion (real edge shapes, red/orange pulse)
+ *   3. CarLayer            – extruded 3-D boxes (6×3×2 m), lerp + heading
+ *   4. TL outer/mid glow  – ScatterplotLayer rings (16 m / 12 m)
+ *   5. TL inner dot        – ScatterplotLayer solid circle (8 m)
+ *   6. TL TextLayer        – countdown seconds, billboard
  */
 export default function MapView() {
   const mapContainerRef = useRef(null)
@@ -48,10 +51,12 @@ export default function MapView() {
   const [viewState, setViewState] = useState(INITIAL_VIEW_STATE)
 
   // ── Layer hooks ─────────────────────────────────────────────────────────
-  // useTrafficLightLayer returns [IconLayer, TextLayer]
-  const heatmapLayer = useDensityHeatmap()
-  const carLayer = useCarLayer()
-  const tlLayers = useTrafficLightLayer()  // array: [iconLayer, textLayer]
+  // useDensityHeatmap  → [HeatmapLayer(ambient), LineLayer(road congestion)]
+  // useCarLayer        → IconLayer (car icons with rotation + lerp)
+  // useTrafficLightLayer → [IconLayer, TextLayer]
+  const roadLayers = useDensityHeatmap()   // array: [ambientHeatmap, roadCongestion]
+  const carLayer   = useCarLayer(viewState)
+  const tlLayers   = useTrafficLightLayer()
 
   // ── Mount MapLibre GL ──────────────────────────────────────────────────
   useEffect(() => {
@@ -104,8 +109,8 @@ export default function MapView() {
       pointerEvents: 'none',
     }
 
-    // Traffic light icon hover
-    if (layer?.id === 'tl-icon-layer') {
+    // Traffic light inner circle hover
+    if (layer?.id === 'tl-inner') {
       const remaining = object.remaining ?? 0
       const state = object.state || '—'
       return { text: `TL-${object.id}: ${state} — ${remaining}s remaining`, style }
@@ -127,14 +132,15 @@ export default function MapView() {
         style={{ position: 'absolute', inset: 0 }}
       />
 
-      {/* DeckGL overlay */}
+      {/* DeckGL overlay — canvas must be transparent so MapLibre tiles show through */}
       <DeckGL
         viewState={viewState}
         controller
         onViewStateChange={onViewStateChange}
-        layers={[heatmapLayer, carLayer, ...tlLayers]}
+        layers={[...roadLayers, carLayer, ...tlLayers]}
         getTooltip={getTooltip}
-        style={{ position: 'absolute', inset: 0 }}
+        style={{ position: 'absolute', inset: 0, background: 'transparent' }}
+        parameters={{ clearColor: [0, 0, 0, 0] }}
       />
     </div>
   )

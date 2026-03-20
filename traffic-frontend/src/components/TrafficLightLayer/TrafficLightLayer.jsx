@@ -1,100 +1,111 @@
 import { useMemo } from 'react'
-import { IconLayer, TextLayer } from '@deck.gl/layers'
+import { ScatterplotLayer, TextLayer } from '@deck.gl/layers'
 import { useSimulationStore } from '../../store/simulationStore'
 
 // ---------------------------------------------------------------------------
-// SVG circle icon atlas (single white circle, 64×64 px, encoded as base64)
-// The IconLayer tints it at render time via getColor, so one atlas covers all
-// signal states without needing separate image assets.
+// State string → [r, g, b] (no alpha — each layer supplies its own)
+// SUMO state strings: 'r'=red, 'y'=yellow, 'g'/'G'=green
+// We pick the dominant character across the whole phase string.
 // ---------------------------------------------------------------------------
-const ICON_SIZE = 64
-const SVG_CIRCLE = `<svg xmlns="http://www.w3.org/2000/svg" width="${ICON_SIZE}" height="${ICON_SIZE}"><circle cx="32" cy="32" r="28" fill="white"/></svg>`
-const ICON_ATLAS = `data:image/svg+xml;base64,${btoa(SVG_CIRCLE)}`
-
-const ICON_MAPPING = {
-  circle: { x: 0, y: 0, width: ICON_SIZE, height: ICON_SIZE, mask: true },
-}
-
-// ---------------------------------------------------------------------------
-// State string → RGBA colour
-// SUMO state strings contain per-signal chars: 'r'=red, 'y'=yellow, 'g'/'G'=green
-// We inspect the dominant character across the whole state string.
-// ---------------------------------------------------------------------------
-function stateToColor(state = '') {
+function stateToRGB(state = '') {
   const s = state.toLowerCase()
   const counts = { r: 0, y: 0, g: 0 }
   for (const ch of s) {
-    if (ch === 'r') counts.r++
+    if      (ch === 'r') counts.r++
     else if (ch === 'y') counts.y++
     else if (ch === 'g') counts.g++
   }
   const dominant = Object.keys(counts).reduce((a, b) => counts[a] >= counts[b] ? a : b)
-  if (dominant === 'g') return [0,   204, 68,  240]  // #00CC44
-  if (dominant === 'y') return [255, 165, 0,   240]  // #FFA500
-  return                       [255, 0,   0,   240]  // #FF0000 (red / default)
+  if (dominant === 'g') return [0,   220, 70 ]   // green
+  if (dominant === 'y') return [255, 165, 0  ]   // yellow
+  return                       [255, 60,  60 ]   // red (default)
 }
 
 /**
- * useTrafficLightLayer – custom hook returning [IconLayer, TextLayer].
+ * useTrafficLightLayer – returns [outerGlow, midGlow, innerDot, text].
  *
- * IconLayer  : SVG circle tinted by dominant signal state colour (r/y/g).
- * TextLayer  : floating countdown in seconds above each icon.
+ * Three concentric ScatterplotLayer circles per junction create a glow effect:
+ *   outer  – 16 m radius, 20% opacity  (wide ambient glow)
+ *   middle – 12 m radius, 50% opacity  (stronger halo)
+ *   inner  – 8 m radius,  solid        (the actual signal lamp)
  *
- * Both layers render empty data until the backend adds lat/lng to TL objects.
- * Enable by adding traci.junction.getPosition(tl_id) + convertGeo() inside
- * SUMORunner._collect_traffic_lights().
+ * All radii are in metres so they scale correctly with zoom level.
+ * Positions come from traci.junction.getPosition() added in the backend.
  */
 export default function useTrafficLightLayer() {
-  const trafficLights = useSimulationStore((state) => state.trafficLights)
+  const trafficLights = useSimulationStore((s) => s.trafficLights)
 
   const data = useMemo(
     () =>
       trafficLights
         .filter((tl) => tl.lng != null && tl.lat != null)
         .map((tl) => ({
-          position:      [tl.lng, tl.lat],
-          textPosition:  [tl.lng, tl.lat],  // same coord; TextLayer offset via pixelOffset
-          id:            tl.id,
-          state:         tl.state ?? '',
-          remaining:     Math.round(tl.phase_duration_remaining ?? 0),
+          position:  [tl.lng, tl.lat],
+          id:        tl.id,
+          state:     tl.state ?? '',
+          remaining: Math.round(tl.phase_duration_remaining ?? 0),
+          rgb:       stateToRGB(tl.state ?? ''),
         })),
     [trafficLights],
   )
 
-  const iconLayer = new IconLayer({
-    id: 'tl-icon-layer',
+  // Outer glow — 16 m, 20% opacity
+  const outerLayer = new ScatterplotLayer({
+    id:             'tl-outer',
     data,
-    iconAtlas: ICON_ATLAS,
-    iconMapping: ICON_MAPPING,
-    getIcon: () => 'circle',
-    getPosition: (d) => d.position,
-    getSize: 20,
-    sizeUnits: 'pixels',
-    getColor: (d) => stateToColor(d.state),
-    pickable: true,
-    updateTriggers: {
-      getColor: trafficLights,
-    },
+    getPosition:    (d) => d.position,
+    getRadius:      16,
+    radiusUnits:    'meters',
+    getFillColor:   (d) => [...d.rgb, 50],
+    stroked:        false,
+    updateTriggers: { getFillColor: trafficLights },
   })
 
+  // Middle glow — 12 m, 50% opacity
+  const midLayer = new ScatterplotLayer({
+    id:             'tl-middle',
+    data,
+    getPosition:    (d) => d.position,
+    getRadius:      12,
+    radiusUnits:    'meters',
+    getFillColor:   (d) => [...d.rgb, 127],
+    stroked:        false,
+    updateTriggers: { getFillColor: trafficLights },
+  })
+
+  // Inner solid circle — 8 m, white outline
+  const innerLayer = new ScatterplotLayer({
+    id:              'tl-inner',
+    data,
+    getPosition:     (d) => d.position,
+    getRadius:       8,
+    radiusUnits:     'meters',
+    getFillColor:    (d) => [...d.rgb, 240],
+    stroked:         true,
+    getLineColor:    [255, 255, 255, 200],
+    getLineWidth:    1,
+    lineWidthUnits:  'pixels',
+    pickable:        true,
+    updateTriggers:  { getFillColor: trafficLights },
+  })
+
+  // Countdown text floating above the inner circle
   const textLayer = new TextLayer({
-    id: 'tl-text-layer',
+    id:                   'tl-text',
     data,
-    getPosition: (d) => d.textPosition,
-    getText: (d) => String(d.remaining),
-    getSize: 11,
-    sizeUnits: 'pixels',
-    getColor: [255, 255, 255, 230],
-    getTextAnchor: 'middle',
+    getPosition:          (d) => d.position,
+    getText:              (d) => String(d.remaining),
+    getSize:              13,
+    sizeUnits:            'pixels',
+    getColor:             [255, 255, 255, 255],
+    getTextAnchor:        'middle',
     getAlignmentBaseline: 'center',
-    fontFamily: '"JetBrains Mono", "Fira Mono", monospace',
-    fontWeight: 700,
-    pixelOffset: [0, -18],  // float above the icon
-    billboard: true,
-    updateTriggers: {
-      getText: trafficLights,
-    },
+    fontFamily:           '"Inter", "Helvetica Neue", sans-serif',
+    fontWeight:           700,
+    pixelOffset:          [0, -26],
+    billboard:            true,
+    updateTriggers:       { getText: trafficLights },
   })
 
-  return [iconLayer, textLayer]
+  return [outerLayer, midLayer, innerLayer, textLayer]
 }
