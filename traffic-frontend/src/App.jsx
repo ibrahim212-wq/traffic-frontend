@@ -4,6 +4,9 @@ import { useSimulationStore } from './store/simulationStore'
 import CesiumMap from './components/CesiumMap/CesiumMap'
 import AIPanel from './components/AIPanel/AIPanel'
 
+// ── Mock mode toggle ────────────────────────────────────────────────────────
+const MOCK_MODE = true
+
 // ── Design tokens ────────────────────────────────────────────────────────────
 const C = {
   bg:         '#0A1628',
@@ -52,6 +55,9 @@ function StatTile({ label, value, unit, accent }) {
 // ── App ──────────────────────────────────────────────────────────────────────
 export default function App() {
   const { isConnected } = useWebSocket()
+
+  // When mock mode, skip WebSocket connection check
+  const displayConnected = MOCK_MODE ? true : isConnected
 
   const step          = useSimulationStore((s) => s.step)
   const vehicles      = useSimulationStore((s) => s.vehicles)
@@ -115,12 +121,12 @@ export default function App() {
         <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}>
           <span style={{
             width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
-            background: isConnected ? C.green : C.red,
-            boxShadow: isConnected ? `0 0 6px ${C.green}` : 'none',
+            background: displayConnected ? C.green : C.red,
+            boxShadow: displayConnected ? `0 0 6px ${C.green}` : 'none',
             display: 'inline-block',
-            animation: isConnected ? 'topPulse 2s ease-out infinite' : 'none',
+            animation: displayConnected ? 'topPulse 2s ease-out infinite' : 'none',
           }} />
-          {isConnected ? (
+          {displayConnected ? (
             <span style={{
               fontSize: 10, fontWeight: 800, letterSpacing: '0.14em',
               padding: '2px 7px', borderRadius: 3,
@@ -145,8 +151,8 @@ export default function App() {
         {/* AI Panel */}
         <AIPanel />
 
-        {/* Loading overlay — shown while disconnected */}
-        {!isConnected && (
+        {/* Loading overlay — shown while disconnected (never in mock mode) */}
+        {!displayConnected && (
           <div style={{
             position: 'absolute', inset: 0,
             background: 'rgba(10,22,40,0.82)',
