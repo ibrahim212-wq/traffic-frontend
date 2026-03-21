@@ -2,18 +2,68 @@ import { useEffect, useRef, useState } from 'react'
 import * as Cesium from 'cesium'
 import { useSimulationStore } from '../../store/simulationStore'
 
+// ── Mock mode toggle ────────────────────────────────────────────────────────
+const MOCK_MODE = true
+
 // ── Constants ─────────────────────────────────────────────────────────────────
 const RIYADH_LNG    = 46.6753
 const RIYADH_LAT    = 24.7136
-const CAMERA_HEIGHT = 1500   // metres above Riyadh
+const CAMERA_HEIGHT = MOCK_MODE ? 800 : 2000
+
+// ── Static mock data ─────────────────────────────────────────────────────────
+
+const MOCK_TL_BASE = [
+  { id: 'tl0',  lng: 46.668,  lat: 24.700 },
+  { id: 'tl1',  lng: 46.668,  lat: 24.710 },
+  { id: 'tl2',  lng: 46.668,  lat: 24.720 },
+  { id: 'tl3',  lng: 46.675,  lat: 24.700 },
+  { id: 'tl4',  lng: 46.675,  lat: 24.710 },
+  { id: 'tl5',  lng: 46.675,  lat: 24.720 },
+  { id: 'tl6',  lng: 46.682,  lat: 24.700 },
+  { id: 'tl7',  lng: 46.682,  lat: 24.710 },
+  { id: 'tl8',  lng: 46.682,  lat: 24.720 },
+  { id: 'tl9',  lng: 46.660,  lat: 24.705 },
+  { id: 'tl10', lng: 46.660,  lat: 24.715 },
+  { id: 'tl11', lng: 46.692,  lat: 24.700 },
+  { id: 'tl12', lng: 46.692,  lat: 24.712 },
+  { id: 'tl13', lng: 46.692,  lat: 24.722 },
+  { id: 'tl14', lng: 46.665,  lat: 24.726 },
+  { id: 'tl15', lng: 46.678,  lat: 24.726 },
+  { id: 'tl16', lng: 46.670,  lat: 24.694 },
+  { id: 'tl17', lng: 46.680,  lat: 24.694 },
+  { id: 'tl18', lng: 46.656,  lat: 24.712 },
+  { id: 'tl19', lng: 46.698,  lat: 24.715 },
+]
+
+// 15 road segments — King Fahd Rd, Olaya St, King Abdullah Rd, Northern Ring, connectors
+const MOCK_ROAD_BASE = [
+  { id: 'r0',  shape: [[46.668, 24.690], [46.668, 24.700]],              level: 'heavy'  },
+  { id: 'r1',  shape: [[46.668, 24.700], [46.668, 24.710]],              level: 'medium' },
+  { id: 'r2',  shape: [[46.668, 24.710], [46.668, 24.720], [46.668, 24.730]], level: 'heavy'  },
+  { id: 'r3',  shape: [[46.682, 24.690], [46.682, 24.700], [46.682, 24.710]], level: 'heavy'  },
+  { id: 'r4',  shape: [[46.682, 24.710], [46.682, 24.720], [46.682, 24.730]], level: 'medium' },
+  { id: 'r5',  shape: [[46.655, 24.720], [46.665, 24.720], [46.675, 24.720]], level: 'heavy'  },
+  { id: 'r6',  shape: [[46.675, 24.720], [46.685, 24.720], [46.695, 24.720]], level: 'medium' },
+  { id: 'r7',  shape: [[46.660, 24.730], [46.675, 24.733], [46.690, 24.730]], level: 'heavy'  },
+  { id: 'r8',  shape: [[46.700, 24.700], [46.700, 24.710], [46.700, 24.720]], level: 'medium' },
+  { id: 'r9',  shape: [[46.660, 24.690], [46.673, 24.692], [46.685, 24.690]], level: 'heavy'  },
+  { id: 'r10', shape: [[46.675, 24.700], [46.679, 24.706], [46.682, 24.710]], level: 'medium' },
+  { id: 'r11', shape: [[46.658, 24.705], [46.662, 24.710], [46.665, 24.716]], level: 'heavy'  },
+  { id: 'r12', shape: [[46.690, 24.705], [46.694, 24.710], [46.697, 24.716]], level: 'medium' },
+  { id: 'r13', shape: [[46.662, 24.718], [46.670, 24.722], [46.680, 24.720]], level: 'heavy'  },
+  { id: 'r14', shape: [[46.673, 24.694], [46.676, 24.700], [46.678, 24.706]], level: 'medium' },
+]
+
+const PHASE_SEQUENCE  = ['r', 'g', 'y']
+const PHASE_DURATIONS = { r: 30, g: 25, y: 3 }
 
 // ── Colour helpers ────────────────────────────────────────────────────────────
 
 /** Speed (m/s) → Cesium.Color for vehicle box fill. */
 function speedToColor(speed) {
-  if (speed > 10) return Cesium.Color.LIME
-  if (speed >= 3) return Cesium.Color.ORANGE
-  return Cesium.Color.RED
+  if (speed > 10) return Cesium.Color.fromCssColorString('#00FF44')
+  if (speed >= 3) return Cesium.Color.fromCssColorString('#FF8800')
+  return Cesium.Color.fromCssColorString('#FF2200')
 }
 
 /**
@@ -57,7 +107,11 @@ function createVehicleEntity(viewer, id, lng, lat, speed) {
     position:    sampledPos,
     orientation: new Cesium.VelocityOrientationProperty(sampledPos),
     box: {
-      dimensions: new Cesium.Cartesian3(2.0, 4.5, 1.5),
+      dimensions: new Cesium.Cartesian3(
+        MOCK_MODE ? 12.0 : 8.0,
+        MOCK_MODE ? 20.0 : 16.0,
+        MOCK_MODE ? 5.0  : 4.0,
+      ),
       material:   new Cesium.ColorMaterialProperty(speedToColor(speed)),
     },
   })
@@ -72,11 +126,17 @@ function createTrafficLightEntities(viewer, tl) {
   const color     = stateToColor(tl.state ?? '')
   const remaining = Math.round(tl.phase_duration_remaining ?? 0)
 
+  const poleLen  = MOCK_MODE ? 8.0  : 4.0
+  const poleTop  = MOCK_MODE ? 8.0  : 4.0
+  const lightH   = MOCK_MODE ? 8.0  : 4.0
+  const labelH   = MOCK_MODE ? 11.0 : 6.5
+  const ellipseR = MOCK_MODE ? 10.0 : 3.0
+
   const pole = viewer.entities.add({
     id:       `tl-pole-${tl.id}`,
-    position: Cesium.Cartesian3.fromDegrees(lng, lat, 2.0),
+    position: Cesium.Cartesian3.fromDegrees(lng, lat, poleLen / 2),
     cylinder: {
-      length:        4.0,
+      length:        poleLen,
       topRadius:     0.2,
       bottomRadius:  0.2,
       material:      Cesium.Color.fromCssColorString('#888888'),
@@ -85,21 +145,21 @@ function createTrafficLightEntities(viewer, tl) {
 
   const light = viewer.entities.add({
     id:       `tl-light-${tl.id}`,
-    position: Cesium.Cartesian3.fromDegrees(lng, lat, 4.0),
+    position: Cesium.Cartesian3.fromDegrees(lng, lat, poleTop),
     ellipse: {
-      semiMajorAxis: 3.0,
-      semiMinorAxis: 3.0,
-      height:        4.0,
+      semiMajorAxis: ellipseR,
+      semiMinorAxis: ellipseR,
+      height:        lightH,
       material:      new Cesium.ColorMaterialProperty(color),
     },
   })
 
   const label = viewer.entities.add({
     id:       `tl-label-${tl.id}`,
-    position: Cesium.Cartesian3.fromDegrees(lng, lat, 6.5),
+    position: Cesium.Cartesian3.fromDegrees(lng, lat, labelH),
     label: {
       text:              String(remaining),
-      font:              'bold 14px Inter, sans-serif',
+      font:              MOCK_MODE ? 'bold 20px Inter, sans-serif' : 'bold 14px Inter, sans-serif',
       fillColor:         Cesium.Color.WHITE,
       style:             Cesium.LabelStyle.FILL_AND_OUTLINE,
       outlineColor:      Cesium.Color.BLACK,
@@ -139,10 +199,96 @@ export default function CesiumMap() {
   // Signals that the viewer is ready; other effects gate on this.
   const [viewerReady, setViewerReady] = useState(false)
 
-  // Store slices
-  const vehicles      = useSimulationStore((s) => s.vehicles)
-  const trafficLights = useSimulationStore((s) => s.trafficLights)
+  // Store slices (unused in MOCK_MODE)
+  const vehicles       = useSimulationStore((s) => s.vehicles)
+  const trafficLights  = useSimulationStore((s) => s.trafficLights)
   const roadCongestion = useSimulationStore((s) => s.roadCongestion)
+
+  // ── Mock state ──────────────────────────────────────────────────────────
+  const mockVehiclesRef = useRef(null)
+  const mockTLsRef      = useRef(null)
+  const mockRoadsRef    = useRef(null)
+  const [mockVehicles, setMockVehicles]   = useState([])
+  const [mockTLs,      setMockTLs]        = useState([])
+  const [mockRoads,    setMockRoads]      = useState([])
+
+  // ── Mock data intervals ─────────────────────────────────────────────────
+  useEffect(() => {
+    if (!MOCK_MODE) return
+
+    // ── Initialize 200 vehicles scattered around Riyadh center
+    mockVehiclesRef.current = Array.from({ length: 200 }, (_, i) => ({
+      id:    `mock-v-${i}`,
+      lng:   RIYADH_LNG + (Math.random() - 0.5) * 0.06,
+      lat:   RIYADH_LAT + (Math.random() - 0.5) * 0.06,
+      speed: 5 + Math.random() * 10,
+      angle: Math.random() * Math.PI * 2,
+    }))
+    setMockVehicles([...mockVehiclesRef.current])
+
+    // ── Initialize 20 traffic lights with random starting phase
+    mockTLsRef.current = MOCK_TL_BASE.map(tl => {
+      const phaseIdx = Math.floor(Math.random() * 3)
+      const phase    = PHASE_SEQUENCE[phaseIdx]
+      return {
+        ...tl,
+        state: phase,
+        phase_duration_remaining: Math.floor(Math.random() * PHASE_DURATIONS[phase]),
+      }
+    })
+    setMockTLs([...mockTLsRef.current])
+
+    // ── Initialize 15 road segments
+    mockRoadsRef.current = [...MOCK_ROAD_BASE]
+    setMockRoads([...mockRoadsRef.current])
+
+    // ── Vehicle movement: every 200ms
+    const metersPerDegLat = 111000
+    const metersPerDegLng = 111000 * Math.cos(RIYADH_LAT * Math.PI / 180)
+    const vehicleTimer = setInterval(() => {
+      mockVehiclesRef.current = mockVehiclesRef.current.map(v => {
+        let lng   = v.lng + Math.cos(v.angle) * v.speed * 0.2 / metersPerDegLng
+        let lat   = v.lat + Math.sin(v.angle) * v.speed * 0.2 / metersPerDegLat
+        let angle = v.angle + (Math.random() - 0.5) * 0.1
+        if (Math.abs(lng - RIYADH_LNG) > 0.05 || Math.abs(lat - RIYADH_LAT) > 0.05) {
+          lng   = RIYADH_LNG + (Math.random() - 0.5) * 0.04
+          lat   = RIYADH_LAT + (Math.random() - 0.5) * 0.04
+          angle = Math.random() * Math.PI * 2
+        }
+        return { ...v, lng, lat, angle }
+      })
+      setMockVehicles([...mockVehiclesRef.current])
+    }, 200)
+
+    // ── TL countdown: every 1000ms
+    const tlTimer = setInterval(() => {
+      mockTLsRef.current = mockTLsRef.current.map(tl => {
+        let remaining = tl.phase_duration_remaining - 1
+        let state     = tl.state
+        if (remaining <= 0) {
+          state     = PHASE_SEQUENCE[(PHASE_SEQUENCE.indexOf(state) + 1) % 3]
+          remaining = PHASE_DURATIONS[state]
+        }
+        return { ...tl, state, phase_duration_remaining: remaining }
+      })
+      setMockTLs([...mockTLsRef.current])
+    }, 1000)
+
+    // ── Road congestion: random shuffle every 8s
+    const roadTimer = setInterval(() => {
+      mockRoadsRef.current = MOCK_ROAD_BASE.map(r => ({
+        ...r,
+        level: Math.random() > 0.4 ? 'heavy' : 'medium',
+      }))
+      setMockRoads([...mockRoadsRef.current])
+    }, 8000)
+
+    return () => {
+      clearInterval(vehicleTimer)
+      clearInterval(tlTimer)
+      clearInterval(roadTimer)
+    }
+  }, [])
 
   // ── Viewer initialization ───────────────────────────────────────────────
   useEffect(() => {
@@ -164,18 +310,17 @@ export default function CesiumMap() {
         fullscreenButton:     false,
       })
 
-      // Replace default Bing layer with OpenStreetMap (no Ion token required)
+      // Dark CartoDB basemap to match dashboard theme
       viewer.imageryLayers.removeAll()
       try {
-        const osmProvider = await Cesium.OpenStreetMapImageryProvider.fromUrl(
-          'https://tile.openstreetmap.org/',
-          { credit: '© OpenStreetMap contributors' },
+        const darkProvider = await Cesium.OpenStreetMapImageryProvider.fromUrl(
+          'https://basemaps.cartocdn.com/dark_all/',
+          { credit: '© CartoDB © OpenStreetMap contributors' },
         )
-        viewer.imageryLayers.addImageryProvider(osmProvider)
+        viewer.imageryLayers.addImageryProvider(darkProvider)
       } catch {
-        // Fallback: constructor form (Cesium < 1.104)
         viewer.imageryLayers.addImageryProvider(
-          new Cesium.OpenStreetMapImageryProvider({ url: 'https://tile.openstreetmap.org/' }),
+          new Cesium.OpenStreetMapImageryProvider({ url: 'https://basemaps.cartocdn.com/dark_all/' }),
         )
       }
 
@@ -187,6 +332,11 @@ export default function CesiumMap() {
       viewer.scene.globe.maximumScreenSpaceError    = 4
       viewer.shadows                                = false
       viewer.clock.shouldAnimate                    = true
+      viewer.scene.globe.show                       = true
+      viewer.scene.skyBox.show                      = false
+      viewer.scene.sun.show                         = false
+      viewer.scene.moon.show                        = false
+      viewer.scene.skyAtmosphere.show               = false
 
       // Camera: Riyadh city centre, 1500 m height, –45° pitch (oblique bird's-eye)
       viewer.camera.setView({
@@ -198,33 +348,13 @@ export default function CesiumMap() {
         },
       })
 
-      // OSM 3-D buildings – optimized with LOD and 500m radius culling
-      if (import.meta.env.VITE_CESIUM_TOKEN) {
-        try {
-          const osmBuildings = await Cesium.createOsmBuildingsAsync()
-          osmBuildings.maximumScreenSpaceError = 32  // Reduce detail for performance
-          
-          // Limit building visibility to 500m radius from camera
-          viewer.scene.preRender.addEventListener(() => {
-            const cameraPos = viewer.camera.positionCartographic
-            const camHeight = cameraPos.height
-            if (camHeight < 3000) {
-              osmBuildings.show = true
-              // Cull buildings beyond 500m from camera center
-              const camCenter = Cesium.Cartesian3.fromRadians(
-                cameraPos.longitude,
-                cameraPos.latitude,
-                0
-              )
-              osmBuildings.cullWithChildrenBounds = false
-            } else {
-              osmBuildings.show = false
-            }
-          })
-          
-          viewer.scene.primitives.add(osmBuildings)
-        } catch { /* silently skip if token invalid */ }
-      }
+      // OSM 3-D buildings disabled — causes severe performance issues
+      // if (import.meta.env.VITE_CESIUM_TOKEN) {
+      //   try {
+      //     const osmBuildings = await Cesium.createOsmBuildingsAsync()
+      //     viewer.scene.primitives.add(osmBuildings)
+      //   } catch { /* silently skip if token invalid */ }
+      // }
 
       viewerRef.current = viewer
       setViewerReady(true)
@@ -260,8 +390,10 @@ export default function CesiumMap() {
       0
     )
 
+    const activeVehicles = MOCK_MODE ? mockVehicles : vehicles
+
     // Calculate distance from camera for each vehicle
-    const vehiclesWithDist = vehicles
+    const vehiclesWithDist = activeVehicles
       .filter(v => v.lng != null && v.lat != null)
       .map(v => {
         const vPos = Cesium.Cartesian3.fromDegrees(v.lng, v.lat, 0)
@@ -296,7 +428,7 @@ export default function CesiumMap() {
         delete vehicleMapRef.current[id]
       }
     }
-  }, [vehicles, viewerReady])
+  }, [vehicles, mockVehicles, viewerReady])
 
   // ── Update traffic lights ───────────────────────────────────────────────
   useEffect(() => {
@@ -306,7 +438,9 @@ export default function CesiumMap() {
 
     const seen = new Set()
 
-    for (const tl of trafficLights) {
+    const activeTLs = MOCK_MODE ? mockTLs : trafficLights
+
+    for (const tl of activeTLs) {
       if (tl.lng == null || tl.lat == null) continue
       seen.add(tl.id)
 
@@ -330,7 +464,7 @@ export default function CesiumMap() {
         delete tlMapRef.current[id]
       }
     }
-  }, [trafficLights, viewerReady])
+  }, [trafficLights, mockTLs, viewerReady])
 
   // ── Update road congestion polylines ────────────────────────────────────
   useEffect(() => {
@@ -342,14 +476,18 @@ export default function CesiumMap() {
     for (const e of roadEntitiesRef.current) viewer.entities.remove(e)
     roadEntitiesRef.current = []
 
-    for (const edge of roadCongestion) {
+    const activeRoads = MOCK_MODE ? mockRoads : roadCongestion
+
+    for (const edge of activeRoads) {
       if (!Array.isArray(edge.shape) || edge.shape.length < 2) continue
 
       // [[lng,lat], ...] → flat [lng, lat, lng, lat, ...] for fromDegreesArray
       const flat      = edge.shape.flatMap(([lng, lat]) => [lng, lat])
       const positions = Cesium.Cartesian3.fromDegreesArray(flat)
-      const color     = edge.level === 'heavy' ? Cesium.Color.RED : Cesium.Color.ORANGE
-      const width     = edge.level === 'heavy' ? 6 : 4
+      const color     = edge.level === 'heavy'
+        ? Cesium.Color.fromCssColorString('#FF2200')
+        : Cesium.Color.fromCssColorString('#FF8800')
+      const width     = edge.level === 'heavy' ? 8 : 5
 
       const entity = viewer.entities.add({
         polyline: {
@@ -364,7 +502,7 @@ export default function CesiumMap() {
       })
       roadEntitiesRef.current.push(entity)
     }
-  }, [roadCongestion, viewerReady])
+  }, [roadCongestion, mockRoads, viewerReady])
 
   // ── Render ──────────────────────────────────────────────────────────────
   return (
